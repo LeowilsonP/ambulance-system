@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Ambulance Safety System</title>
+  <!-- TensorFlow.js and Teachable Machine Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: Arial, sans-serif; }
+    body { background: #121212; color: #ffffff; text-align: center; margin: 0; padding: 15px; }
+    h1 { color: #ff4d4d; margin-bottom: 5px; }
+    p { color: #aaaaaa; margin-top: 0; }
+    
+    .card { background: #1e1e1e; padding: 15px; border-radius: 12px; margin: 15px auto; max-width: 350px; border: 1px solid #333; }
+    input { width: 90%; padding: 10px; margin: 5px 0; border-radius: 5px; border: 1px solid #444; background: #2a2a2a; color: white; }
+    button { background: #ff4d4d; color: white; border: none; padding: 12px 20px; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; width: 95%; margin-top: 10px; }
+    
+    #webcam-container { margin: 10px auto; width: 280px; height: 280px; border: 3px solid #ff4d4d; border-radius: 12px; overflow: hidden; background: #000; }
+    
+    .status-banner { padding: 15px; font-size: 18px; font-weight: bold; border-radius: 8px; margin-top: 10px; background: #2a2a2a; color: #00ffcc; }
+    .hazard-active { background: #ffaa00 !important; color: #000 !important; animation: blink 0.8s infinite; }
+    .crash-active { background: #ff0000 !important; color: #fff !important; animation: blink 0.3s infinite; }
+    
+    @keyframes blink {
+      0% { opacity: 1; }
+      50% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🚑 Smart Ambulance Safety</h1>
+  <p>AI Hazard Warning & Crash Detection</p>
+
+  <!-- SETUP BOX -->
+  <div class="card" id="setup-card">
+    <h3>System Setup</h3>
+    <input type="text" id="modelUrl" placeholder="Paste Teachable Machine URL Here">
+    <button onclick="startSystem()">START SYSTEM</button>
+  </div>
+
+  <!-- LIVE CAMERA VIEW -->
+  <div id="webcam-container"></div>
+
+  <!-- HAZARD & CRASH DISPLAY BANNER -->
+  <div class="card">
+    <h3>Visual AI Detection</h3>
+    <div id="hazard-banner" class="status-banner">SYSTEM OFFLINE</div>
+  </div>
+
+  <!-- ACCELEROMETER STATUS -->
+  <div class="card">
+    <h3>Impact G-Force Sensor</h3>
+    <div id="sensor-banner" class="status-banner">SENSOR INACTIVE</div>
+  </div>
+
+  <!-- AUDIO ALARMS -->
+  <audio id="hazard-sound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+  <audio id="siren-sound" src="https://actions.google.com/sounds/v1/emergency/emergency_siren_short.ogg" preload="auto"></audio>
+
+  <script>
+    let model, webcam, maxPredictions;
+    let crashReported = false;
+
+    async function startSystem() {
+      const URL = document.getElementById("modelUrl").value.trim();
+      if (!URL) { 
+        alert("Please paste your Google Teachable Machine URL first!"); 
+        return; 
+      }
+
+      document.getElementById("hazard-banner").innerText = "Loading AI Model...";
+
+      try {
+        // 1. Load Teachable Machine Model
+        const modelURL = URL.endsWith("/") ? URL + "model.json" : URL + "/model.json";
+        const metadataURL = URL.endsWith("/") ? URL + "metadata.json" : URL + "/metadata.json";
+        model = await tmImage.load(modelURL, metadataURL);
+        maxPredictions = model.getTotalClasses();
+
+        // 2. Setup Phone Camera
+        webcam = new tmImage.Webcam(280, 280, true);
+        await webcam.setup({ facingMode: "environment" }); // Uses phone rear camera
+        await webcam.play();
+        window.requestAnimationFrame(loop);
+
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
+        document.getElementById("hazard-banner").innerText = "🟢 Road Clear";
+        document.getElementById("setup-card").style.display = "none";
+
+        // 3. Request Motion Sensors (Accelerometer)
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+          DeviceMotionEvent.requestPermission().then(response => {
+            if (response === 'granted') {
+              window.addEventListener('devicemotion', handleMotion);
+            }
+          });
+        } else {
+          window.addEventListener('devicemotion', handleMotion);
+        }
+
+        document.getElementById("sensor-banner").innerText = "🟢 Sensor Active";
+
+      } catch (err) {
+        alert("Failed to load AI model. Make sure you pasted the complete shareable URL from Teachable Machine.");
+        document.getElementById("hazard-banner").innerText = "ERROR LOADING MODEL";
+      }
+    }
+
+    async function loop() {
+      webcam.update();
+      await predict();
+      window.requestAnimationFrame(loop);
+    }
+
+    async function predict() {
+      const prediction = await model.predict(webcam.canvas);
+      let obstacleProb = 0;
+
+      for (let i = 0; i < maxPredictions; i++) {
+        if (prediction[i].className.toLowerCase().includes("obstacle")) {
+          obstacleProb = prediction[i].probability;
+        }
+      }
+
+      const hazardBanner = document.getElementById("hazard-banner");
+
+      // Trigger visual & audio warning if obstacle is detected (>80% confidence)
+      if (obstacleProb > 0.8) {
+        hazardBanner.innerText = "⚠️ OBSTACLE AHEAD!";
+        hazardBanner.className = "status-banner hazard-active";
+        document.getElementById("hazard-sound").play();
+      } else if (!crashReported) {
+        hazardBanner.innerText = "🟢 Road Clear";
+        hazardBanner.className = "status-banner";
+      }
+    }
+
+    function handleMotion(event) {
+      let acc = event.accelerationIncludingGravity;
+      if (!acc) return;
+
+      // Calculate total G-force impact magnitude
+      let totalAccel = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+
+      // Threshold: Spike > 25 m/s² indicates a sudden crash/deceleration impact
+      if (totalAccel > 25 && !crashReported) {
+        crashReported = true;
+        
+        const sensorBanner = document.getElementById("sensor-banner");
+        sensorBanner.innerText = "🚨 CRASH DETECTED (" + totalAccel.toFixed(1) + " m/s²)";
+        sensorBanner.className = "status-banner crash-active";
+        
+        document.getElementById("siren-sound").play();
+
+        // Reset the crash state after 8 seconds
+        setTimeout(() => { 
+          crashReported = false; 
+          sensorBanner.innerText = "🟢 Sensor Active"; 
+          sensorBanner.className = "status-banner";
+        }, 8000);
+      }
+    }
+  </script>
+</body>
+</html>
