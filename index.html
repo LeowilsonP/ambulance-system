@@ -14,7 +14,7 @@
     p { color: #aaaaaa; margin-top: 0; }
     
     .card { background: #1e1e1e; padding: 15px; border-radius: 12px; margin: 15px auto; max-width: 350px; border: 1px solid #333; }
-    input { width: 90%; padding: 10px; margin: 5px 0; border-radius: 5px; border: 1px solid #444; background: #2a2a2a; color: white; }
+    input { width: 95%; padding: 10px; margin: 5px 0; border-radius: 5px; border: 1px solid #444; background: #2a2a2a; color: white; }
     button { background: #ff4d4d; color: white; border: none; padding: 12px 20px; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; width: 95%; margin-top: 10px; }
     
     #webcam-container { margin: 10px auto; width: 280px; height: 280px; border: 3px solid #ff4d4d; border-radius: 12px; overflow: hidden; background: #000; }
@@ -33,19 +33,21 @@
 <body>
 
   <h1>🚑 Smart Ambulance Safety</h1>
-  <p>AI Hazard Warning & Crash Detection</p>
+  <p>AI Hazard Warning & Hospital Alert System</p>
 
   <!-- SETUP BOX -->
   <div class="card" id="setup-card">
     <h3>System Setup</h3>
-    <input type="text" id="modelUrl" placeholder="Paste Teachable Machine URL Here">
+    <input type="text" id="modelUrl" placeholder="Teachable Machine Model URL">
+    <input type="text" id="botToken" placeholder="Telegram Bot Token">
+    <input type="text" id="chatId" placeholder="Telegram Chat ID">
     <button onclick="startSystem()">START SYSTEM</button>
   </div>
 
   <!-- LIVE CAMERA VIEW -->
   <div id="webcam-container"></div>
 
-  <!-- HAZARD & CRASH DISPLAY BANNER -->
+  <!-- HAZARD DISPLAY BANNER -->
   <div class="card">
     <h3>Visual AI Detection</h3>
     <div id="hazard-banner" class="status-banner">SYSTEM OFFLINE</div>
@@ -68,7 +70,7 @@
     async function startSystem() {
       const URL = document.getElementById("modelUrl").value.trim();
       if (!URL) { 
-        alert("Please paste your Google Teachable Machine URL first!"); 
+        alert("Please enter your Teachable Machine URL!"); 
         return; 
       }
 
@@ -105,7 +107,7 @@
         document.getElementById("sensor-banner").innerText = "🟢 Sensor Active";
 
       } catch (err) {
-        alert("Failed to load AI model. Make sure you pasted the complete shareable URL from Teachable Machine.");
+        alert("Failed to load AI model. Please check your URL.");
         document.getElementById("hazard-banner").innerText = "ERROR LOADING MODEL";
       }
     }
@@ -128,7 +130,6 @@
 
       const hazardBanner = document.getElementById("hazard-banner");
 
-      // Trigger visual & audio warning if obstacle is detected (>80% confidence)
       if (obstacleProb > 0.8) {
         hazardBanner.innerText = "⚠️ OBSTACLE AHEAD!";
         hazardBanner.className = "status-banner hazard-active";
@@ -143,26 +144,57 @@
       let acc = event.accelerationIncludingGravity;
       if (!acc) return;
 
-      // Calculate total G-force impact magnitude
       let totalAccel = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
 
-      // Threshold: Spike > 25 m/s² indicates a sudden crash/deceleration impact
+      // Trigger threshold for impact (>25 m/s²)
       if (totalAccel > 25 && !crashReported) {
         crashReported = true;
         
         const sensorBanner = document.getElementById("sensor-banner");
-        sensorBanner.innerText = "🚨 CRASH DETECTED (" + totalAccel.toFixed(1) + " m/s²)";
+        sensorBanner.innerText = "🚨 CRASH DETECTED! Sending Alert...";
         sensorBanner.className = "status-banner crash-active";
         
         document.getElementById("siren-sound").play();
 
-        // Reset the crash state after 8 seconds
+        // Send alert to Telegram Hospital Desk
+        sendHospitalAlert(totalAccel);
+
         setTimeout(() => { 
           crashReported = false; 
           sensorBanner.innerText = "🟢 Sensor Active"; 
           sensorBanner.className = "status-banner";
         }, 8000);
       }
+    }
+
+    function sendHospitalAlert(force) {
+      const token = document.getElementById("botToken").value.trim();
+      const chatId = document.getElementById("chatId").value.trim();
+
+      if (!token || !chatId) {
+        console.log("Telegram credentials missing.");
+        return;
+      }
+
+      // Get GPS coordinates and send alert
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          let lat = position.coords.latitude;
+          let lon = position.coords.longitude;
+          let mapLink = `https://www.google.com/maps?q=${lat},${lon}`;
+          
+          let message = `🚨 *ACCIDENT ALERT: AMBULANCE #1*%0A%0A` +
+                        `💥 Impact Force: ${force.toFixed(1)} m/s²%0A` +
+                        `📍 Location: ${mapLink}`;
+
+          fetch(`https://api.telegram.org/bot${token}/sendMessage?chat_id=${chatId}&text=${message}&parse_mode=Markdown`);
+        },
+        () => {
+          // Fallback if GPS fails
+          let message = `🚨 *ACCIDENT ALERT: AMBULANCE #1*%0A%0A💥 Impact Force: ${force.toFixed(1)} m/s²%0A📍 Location: GPS Unavailable`;
+          fetch(`https://api.telegram.org/bot${token}/sendMessage?chat_id=${chatId}&text=${message}&parse_mode=Markdown`);
+        }
+      );
     }
   </script>
 </body>
